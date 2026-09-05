@@ -7,9 +7,7 @@ export interface ExecutePurchaseParams {
   totalAmountStr: string;
   smartAccountAddress: `0x${string}`;
   // Privy Smart Wallet client or Privy smart wallet request object
-  smartWalletClient: {
-    request: (args: { method: string; params: any[] }) => Promise<any>;
-  };
+  smartWalletClient: any;
 }
 
 export interface PurchaseResult {
@@ -76,21 +74,35 @@ export async function executeOneTapPurchase({
     let sendCallsResponse: any;
 
     try {
-      sendCallsResponse = await smartWalletClient.request({
-        method: 'wallet_sendCalls',
-        params: [
-          {
-            version: '1.0',
-            from: smartAccountAddress,
-            calls,
-            capabilities: {
-              paymasterService: {
-                url: PAYMASTER_URL,
-              },
+      if (typeof smartWalletClient.sendCalls === 'function') {
+        sendCallsResponse = await smartWalletClient.sendCalls({
+          account: smartAccountAddress,
+          calls,
+          capabilities: {
+            paymasterService: {
+              url: PAYMASTER_URL,
             },
           },
-        ],
-      });
+        });
+      } else if (typeof smartWalletClient.request === 'function') {
+        sendCallsResponse = await smartWalletClient.request({
+          method: 'wallet_sendCalls',
+          params: [
+            {
+              version: '1.0',
+              from: smartAccountAddress,
+              calls,
+              capabilities: {
+                paymasterService: {
+                  url: PAYMASTER_URL,
+                },
+              },
+            },
+          ],
+        });
+      } else {
+        throw new Error('Smart Wallet client does not support sendCalls or request method.');
+      }
     } catch (err: any) {
       console.warn('wallet_sendCalls request notice:', err);
 
