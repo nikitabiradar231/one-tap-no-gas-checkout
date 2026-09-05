@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useSmartWallets } from '@privy-io/react-auth/smart-wallets';
 import { Header } from '../components/Header';
@@ -17,7 +17,7 @@ export default function Storefront() {
   const { login, logout, authenticated, user } = usePrivy();
   const { client: smartWalletClient } = useSmartWallets();
 
-  // Smart Account Address derived from Privy Smart Wallet (Rule 1 & Rule 4)
+  // Smart Account Address derived exclusively from Privy Smart Wallet (Rule 1 & Rule 4)
   const [smartAccountAddress, setSmartAccountAddress] = useState<`0x${string}` | null>(null);
 
   // Cart state
@@ -29,15 +29,22 @@ export default function Storefront() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
-  // Sync Smart Account Address from Privy Smart Wallets Client
+  // Strictly sync Smart Account Address from Privy Smart Wallets Client ONLY
+  // Never set smartAccountAddress to embedded EOA signer address (Rule 4 Compliance)
   useEffect(() => {
     if (smartWalletClient?.account?.address) {
       setSmartAccountAddress(smartWalletClient.account.address as `0x${string}`);
-    } else if (user?.wallet?.address) {
-      // Fallback for demonstration if smart account client initializes lazily
-      setSmartAccountAddress(user.wallet.address as `0x${string}`);
     } else {
-      setSmartAccountAddress(null);
+      // Look up smart wallet account from linked accounts if client object is initializing
+      const smartWalletAcc = user?.linkedAccounts?.find(
+        (acc) => acc.type === 'smart_wallet'
+      ) as any;
+
+      if (smartWalletAcc?.address) {
+        setSmartAccountAddress(smartWalletAcc.address as `0x${string}`);
+      } else {
+        setSmartAccountAddress(null);
+      }
     }
   }, [smartWalletClient, user]);
 
@@ -81,8 +88,8 @@ export default function Storefront() {
     setCartItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // Immediate "Buy Now" flow
-  const handleBuyNow = (product: Product) => {
+  // Immediate "Buy Now" flow with Double-Click Idempotency Guard (Test Case 7)
+  const handleBuyNow = useCallback((product: Product) => {
     if (!authenticated) {
       login();
       return;
@@ -97,13 +104,17 @@ export default function Storefront() {
     };
 
     const buyerAddr = smartAccountAddress || '0x0000000000000000000000000000000000000000';
-    const order = orderRegistry.createOrder([item], product.price, buyerAddr);
+    
+    // Deterministic Order Identity for instant product buy attempt to survive rapid double-clicks
+    const deterministicOrderId = `ORD-${product.id}-${buyerAddr.slice(2, 8).toUpperCase()}`;
+    const order = orderRegistry.createOrder([item], product.price, buyerAddr, deterministicOrderId);
+    
     setActiveOrder(order);
     setIsCheckoutOpen(true);
-  };
+  }, [authenticated, login, smartAccountAddress]);
 
   // Cart Checkout flow
-  const handleCartCheckout = () => {
+  const handleCartCheckout = useCallback(() => {
     if (!authenticated) {
       login();
       return;
@@ -119,10 +130,10 @@ export default function Storefront() {
     const order = orderRegistry.createOrder(cartItems, totalAmount, buyerAddr);
     setActiveOrder(order);
     setIsCheckoutOpen(true);
-  };
+  }, [authenticated, cartItems, login, smartAccountAddress]);
 
   const handleOrderSuccess = (order: Order) => {
-    // Clear cart if items matched
+    // Clear cart items
     setCartItems([]);
   };
 
